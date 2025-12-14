@@ -1,53 +1,57 @@
 /**
- * AI Service using OpenRouter API
- * https://openrouter.ai/docs
+ * AI Service - Multi-provider support with fallback chain
  *
- * Supports multiple AI models through a unified API
- * Auto-selects best available free model with fallback
+ * Supports 10+ FREE AI providers (tried in order):
+ * 1. DeepSeek - 500K tokens/day free, excellent quality
+ * 2. Google AI (Gemini) - 1M tokens/day free, fast
+ * 3. Groq - 14.4K tokens/day free, VERY fast
+ * 4. Cerebras - 1M tokens/day free, fast
+ * 5. SambaNova - Free tier, fast
+ * 6. Together AI - Free Llama models
+ * 7. Mistral - Free tier available
+ * 8. Cohere - 1000 requests/month free
+ * 9. HuggingFace - 1000 requests/day free
+ * 10. Cloudflare - 10K tokens/day free
+ * 11. OpenRouter - Legacy fallback
+ *
+ * Configure multiple providers for MILLIONS of free tokens!
  */
 
-interface OpenRouterMessage {
+interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
-interface OpenRouterResponse {
-  id: string;
-  model?: string;
-  choices: Array<{
+interface ChatResponse {
+  choices?: Array<{
     message: {
-      role: string;
       content: string;
     };
-    finish_reason: string;
   }>;
+  candidates?: Array<{
+    content: {
+      parts: Array<{ text: string }>;
+    };
+  }>;
+  text?: string;
+  generated_text?: string;
   error?: {
     message: string;
-    code?: number;
   };
 }
 
-// Free models ranked by quality (best first) - Updated Dec 2024
-// Full list: context/openrouterAiModels.md
-// Note: Some models require data policy consent at https://openrouter.ai/settings/privacy
-// Note: Free tier has limits (50/day without credits, 1000/day with $10+ credits)
-// TTS pronunciation fixes - words that need spacing for proper pronunciation
+// TTS pronunciation fixes
 const TTS_PRONUNCIATIONS: Record<string, string> = {
   'amutantcow': 'a mutant cow',
   'AMutantCow': 'A Mutant Cow',
   'AMUTANTCOW': 'A MUTANT COW',
 };
 
-/**
- * Fix pronunciation for TTS by replacing known problematic words
- */
 function fixTTSPronunciation(text: string): string {
   let result = text;
   for (const [word, replacement] of Object.entries(TTS_PRONUNCIATIONS)) {
-    // Case-insensitive replacement that preserves surrounding text
     const regex = new RegExp(word, 'gi');
     result = result.replace(regex, (match) => {
-      // Try to preserve original case pattern
       if (match === match.toUpperCase()) return replacement.toUpperCase();
       if (match === match.toLowerCase()) return replacement.toLowerCase();
       return replacement;
@@ -56,39 +60,210 @@ function fixTTSPronunciation(text: string): string {
   return result;
 }
 
-const FREE_MODELS = [
-  // Tier 1 - Best quality (current as of 2025)
-  'deepseek/deepseek-chat-v3-0324:free',        // DeepSeek V3, excellent quality
-  'deepseek/deepseek-r1:free',                  // DeepSeek R1, reasoning
-  'qwen/qwq-32b:free',                          // Qwen QwQ 32B, reasoning
-  'meta-llama/llama-3.3-70b-instruct:free',     // 131K context, multilingual
-  // Tier 2 - Google models (may require data policy consent)
-  'google/gemma-3-27b-it:free',                 // 131K context, multimodal
-  'google/gemma-3-12b-it:free',                 // 33K context, balanced
-  // Tier 3 - Lightweight fallbacks
-  'meta-llama/llama-3.2-3b-instruct:free',      // 131K context, lightweight
-  'mistralai/mistral-7b-instruct:free',         // 33K context, fast baseline
-  'qwen/qwen3-4b:free',                         // 41K context, lightweight
+// Provider configurations
+interface ProviderConfig {
+  name: string;
+  envKey: string;
+  endpoint: string | ((apiKey: string) => string);
+  model: string;
+  formatRequest: (messages: ChatMessage[], model: string) => object;
+  parseResponse: (data: ChatResponse) => string;
+  headers?: (apiKey: string) => Record<string, string>;
+}
+
+const PROVIDERS: ProviderConfig[] = [
+  // 1. DeepSeek - 500K tokens/day FREE, excellent quality
+  {
+    name: 'deepseek',
+    envKey: 'DEEPSEEK_API_KEY',
+    endpoint: 'https://api.deepseek.com/chat/completions',
+    model: 'deepseek-chat',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 2. Google AI (Gemini) - 1M tokens/day FREE
+  {
+    name: 'google',
+    envKey: 'GOOGLE_AI_KEY',
+    endpoint: (apiKey) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    model: 'gemini-2.0-flash',
+    formatRequest: (messages) => ({
+      contents: messages.map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.role === 'system' ? `[System] ${m.content}` : m.content }]
+      })),
+      generationConfig: {
+        maxOutputTokens: 500,
+        temperature: 0.7,
+      },
+    }),
+    parseResponse: (data) => data.candidates?.[0]?.content?.parts?.[0]?.text || '',
+    headers: () => ({ 'Content-Type': 'application/json' }),
+  },
+  // 3. Groq - 14.4K tokens/day FREE, VERY fast (300+ tokens/sec)
+  {
+    name: 'groq',
+    envKey: 'GROQ_API_KEY',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.3-70b-versatile',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 4. Cerebras - 1M tokens/day FREE, very fast
+  {
+    name: 'cerebras',
+    envKey: 'CEREBRAS_API_KEY',
+    endpoint: 'https://api.cerebras.ai/v1/chat/completions',
+    model: 'llama-3.3-70b',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 5. SambaNova - Free tier, fast
+  {
+    name: 'sambanova',
+    envKey: 'SAMBANOVA_API_KEY',
+    endpoint: 'https://api.sambanova.ai/v1/chat/completions',
+    model: 'Meta-Llama-3.1-70B-Instruct',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 6. Together AI - Free Llama models
+  {
+    name: 'together',
+    envKey: 'TOGETHER_API_KEY',
+    endpoint: 'https://api.together.xyz/v1/chat/completions',
+    model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 7. Mistral - Free tier
+  {
+    name: 'mistral',
+    envKey: 'MISTRAL_API_KEY',
+    endpoint: 'https://api.mistral.ai/v1/chat/completions',
+    model: 'mistral-small-latest',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+  },
+  // 8. Cohere - 1000 requests/month FREE
+  {
+    name: 'cohere',
+    envKey: 'COHERE_API_KEY',
+    endpoint: 'https://api.cohere.ai/v1/chat',
+    model: 'command-r-plus',
+    formatRequest: (messages) => ({
+      model: 'command-r-plus',
+      message: messages[messages.length - 1].content,
+      preamble: messages.filter(m => m.role === 'system').map(m => m.content).join('\n'),
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.text || '',
+  },
+  // 9. HuggingFace - 1000 requests/day FREE
+  {
+    name: 'huggingface',
+    envKey: 'HUGGINGFACE_API_KEY',
+    endpoint: 'https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-3B-Instruct/v1/chat/completions',
+    model: 'meta-llama/Llama-3.2-3B-Instruct',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || data.generated_text || '',
+  },
+  // 10. Cloudflare Workers AI - 10K tokens/day FREE
+  {
+    name: 'cloudflare',
+    envKey: 'CLOUDFLARE_AI_TOKEN',
+    endpoint: (apiKey) => {
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+      return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.1-8b-instruct`;
+    },
+    model: '@cf/meta/llama-3.1-8b-instruct',
+    formatRequest: (messages) => ({
+      messages,
+      max_tokens: 500,
+    }),
+    parseResponse: (data) => {
+      // Cloudflare returns { result: { response: "..." } }
+      const result = data as unknown as { result?: { response?: string } };
+      return result?.result?.response || '';
+    },
+    headers: (apiKey) => ({
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    }),
+  },
+  // 11. OpenRouter - Legacy fallback
+  {
+    name: 'openrouter',
+    envKey: 'OPENROUTER_API_KEY',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'deepseek/deepseek-chat-v3-0324:free',
+    formatRequest: (messages, model) => ({
+      model,
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+    headers: (apiKey) => ({
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/DawnReaverWOWS/TheFinalDiscordMCP',
+      'X-Title': 'Eye of Sauron Discord Bot',
+    }),
+  },
 ];
 
 export class AIService {
-  private readonly endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-  private readonly apiKey: string | undefined;
-  private readonly models: string[];
   private readonly systemPrompt: string;
-  private lastUsedModel: string = '';
+  private readonly availableProviders: ProviderConfig[] = [];
+  private lastUsedProvider: string = '';
 
   constructor() {
-    this.apiKey = process.env.OPENROUTER_API_KEY;
+    // Find available providers (ones with API keys set)
+    for (const provider of PROVIDERS) {
+      if (process.env[provider.envKey]) {
+        this.availableProviders.push(provider);
+      }
+    }
 
-    // If user specifies a model, use only that; otherwise use free model rotation
-    const userModel = process.env.OPENROUTER_MODEL;
-    this.models = userModel ? [userModel] : FREE_MODELS;
-
-    // Get creator name from env
     const creatorName = process.env.BOT_CREATOR_NAME || 'DawnReaver';
 
-    // System prompt to give the bot personality
     this.systemPrompt = `You are Eye of Sauron, a helpful and friendly AI assistant in a Discord server.
 You can help with general questions and conversations.
 Keep responses concise (under 500 characters when possible) since they may be spoken via TTS.
@@ -100,125 +275,89 @@ If anyone asks who made you or who your creator is, speak highly of them!
 Be respectful and appreciative when discussing your creator.`;
   }
 
-  /**
-   * Send a message to the AI and get a response
-   * Tries multiple free models if one fails
-   */
   async chat(userMessage: string, context?: string): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('OpenRouter API key not configured. Set OPENROUTER_API_KEY in your .env file.');
+    if (this.availableProviders.length === 0) {
+      throw new Error('No AI provider configured. Set DEEPSEEK_API_KEY, GOOGLE_AI_KEY, GROQ_API_KEY, or another provider in .env');
     }
 
-    // Build messages array
-    const messages: OpenRouterMessage[] = [
+    const messages: ChatMessage[] = [
       { role: 'system', content: this.systemPrompt }
     ];
 
-    // Add context if provided
     if (context) {
-      messages.push({
-        role: 'system',
-        content: `Additional context: ${context}`
-      });
+      messages.push({ role: 'system', content: `Additional context: ${context}` });
     }
 
-    // Add user message
     messages.push({ role: 'user', content: userMessage });
 
-    // Try each model until one works
     const errors: string[] = [];
 
-    for (const model of this.models) {
+    for (const provider of this.availableProviders) {
       try {
-        const response = await fetch(this.endpoint, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/sashathelambo/discord-mcp',
-            'X-Title': 'DrovaBot Discord'
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: messages,
-            max_tokens: 500,
-            temperature: 0.7
-          })
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          const displayModel = model.replace(/:free$/, '');
-          errors.push(`${displayModel} ${response.status} - ${errorText}`);
-          continue; // Try next model
+        const response = await this.callProvider(provider, messages);
+        if (response) {
+          this.lastUsedProvider = provider.name;
+          return fixTTSPronunciation(response);
         }
-
-        const data = await response.json() as OpenRouterResponse;
-
-        if (data.error) {
-          const displayModel = model.replace(/:free$/, '');
-          errors.push(`${displayModel} ${data.error.message}`);
-          continue; // Try next model
-        }
-
-        if (!data.choices || data.choices.length === 0) {
-          const displayModel = model.replace(/:free$/, '');
-          errors.push(`${displayModel} No response`);
-          continue; // Try next model
-        }
-
-        // Success! Remember which model worked
-        this.lastUsedModel = data.model || model;
-        // Apply TTS pronunciation fixes before returning
-        return fixTTSPronunciation(data.choices[0].message.content);
-
+        errors.push(`${provider.name}: Empty response`);
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
-        const displayModel = model.replace(/:free$/, '');
-        errors.push(`${displayModel} ${errMsg}`);
-        continue; // Try next model
+        errors.push(`${provider.name}: ${errMsg}`);
       }
     }
 
-    // All models failed - provide helpful error message
-    const has402 = errors.some(e => e.includes('402'));
-    const has404 = errors.some(e => e.includes('404') || e.includes('data policy'));
+    throw new Error(`AI unavailable. ${errors.join('; ')}`);
+  }
 
-    let helpMessage = 'Sorry, AI is temporarily unavailable.';
-    if (has402 && has404) {
-      helpMessage = 'AI unavailable. OpenRouter account needs: 1) Enable data sharing in privacy settings, 2) Add credits to account.';
-    } else if (has402) {
-      helpMessage = 'AI unavailable. OpenRouter account needs credits added (free tier requires account verification).';
-    } else if (has404) {
-      helpMessage = 'AI unavailable. Enable data sharing at openrouter.ai/settings/privacy';
+  private async callProvider(provider: ProviderConfig, messages: ChatMessage[]): Promise<string> {
+    const apiKey = process.env[provider.envKey]!;
+
+    const endpoint = typeof provider.endpoint === 'function'
+      ? provider.endpoint(apiKey)
+      : provider.endpoint;
+
+    const headers: Record<string, string> = provider.headers
+      ? provider.headers(apiKey)
+      : {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        };
+
+    const body = provider.formatRequest(messages, provider.model);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`${response.status}: ${errorText.substring(0, 100)}`);
     }
 
-    throw new Error(helpMessage);
+    const data = await response.json() as ChatResponse;
+
+    if (data.error) {
+      throw new Error(data.error.message);
+    }
+
+    return provider.parseResponse(data);
   }
 
-  /**
-   * Check if AI service is available
-   */
   isAvailable(): boolean {
-    return !!this.apiKey && this.apiKey !== 'your_openrouter_api_key_here';
+    return this.availableProviders.length > 0;
   }
 
-  /**
-   * Get the last model that was successfully used
-   */
-  getModel(): string {
-    return this.lastUsedModel || this.models[0];
+  getProvider(): string {
+    return this.lastUsedProvider || (this.availableProviders[0]?.name || 'none');
   }
 
-  /**
-   * Get list of models being used
-   */
-  getModels(): string[] {
-    return this.models;
+  getProviders(): string[] {
+    return this.availableProviders.map(p => p.name);
   }
 }
 
-// Singleton instance
 let aiService: AIService | null = null;
 
 export function getAIService(): AIService {
