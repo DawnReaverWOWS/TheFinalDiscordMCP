@@ -2673,7 +2673,9 @@ export class PrefixCommandHandler {
     }
 
     // Show typing indicator while processing
-    await (message.channel as TextChannel).sendTyping();
+    if ('sendTyping' in message.channel) {
+      await message.channel.sendTyping();
+    }
 
     try {
       // Add context about who's asking
