@@ -1,0 +1,164 @@
+name: Deploy to Oracle Cloud VMs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  APP_DIR: ~/discord-mcp
+  PM2_APP_NAME: discord-mcp
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --omit=optional
+
+      - name: Build
+        run: npm run build
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r dist deploy/
+          cp package.json deploy/
+          cp package-lock.json deploy/
+          cp .env.example deploy/
+          tar -czvf deploy.tar.gz deploy/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-package
+          path: deploy.tar.gz
+          retention-days: 1
+
+  deploy-vm1:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VM1_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Backup current version on VM1
+        run: |
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM1_HOST }} "
+            cd ${{ env.APP_DIR }} && \
+            if [ -d dist ]; then
+              rm -rf dist.backup.2 2>/dev/null || true
+              mv dist.backup.1 dist.backup.2 2>/dev/null || true
+              mv dist dist.backup.1 2>/dev/null || true
+              echo 'Backup created'
+            else
+              echo 'No existing deployment to backup'
+            fi
+          " || echo "Backup step completed"
+
+      - name: Deploy to VM1
+        run: |
+          scp deploy.tar.gz ${{ secrets.VM_USER }}@${{ secrets.VM1_HOST }}:${{ env.APP_DIR }}/
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM1_HOST }} "
+            cd ${{ env.APP_DIR }} && \
+            tar -xzvf deploy.tar.gz && \
+            cp -r deploy/* . && \
+            rm -rf deploy deploy.tar.gz && \
+            npm ci --omit=dev --omit=optional --ignore-scripts && \
+            node node_modules/ffmpeg-static/install.js && \
+            grep -q '^OPENROUTER_API_KEY=' .env 2>/dev/null && sed -i 's|^OPENROUTER_API_KEY=.*|OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}|' .env || echo 'OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}' >> .env && \
+            grep -q '^BOT_NOTIFY_CHANNEL_ID=' .env 2>/dev/null && sed -i 's|^BOT_NOTIFY_CHANNEL_ID=.*|BOT_NOTIFY_CHANNEL_ID=${{ vars.BOT_NOTIFY_CHANNEL_ID }}|' .env || echo 'BOT_NOTIFY_CHANNEL_ID=${{ vars.BOT_NOTIFY_CHANNEL_ID }}' >> .env && \
+            pm2 delete ${{ env.PM2_APP_NAME }} 2>/dev/null || true && \
+            VM_NAME=VM-DISC-AI-001 pm2 start dist/index.js --name ${{ env.PM2_APP_NAME }} && \
+            pm2 save
+          "
+
+      - name: Health check VM1
+        run: |
+          sleep 5
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM1_HOST }} "
+            pm2 list | grep -q '${{ env.PM2_APP_NAME }}.*online' && echo 'VM1 healthy' || (echo 'VM1 unhealthy' && exit 1)
+          "
+
+  deploy-vm2:
+    needs: deploy-vm1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VM2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Backup current version on VM2
+        run: |
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM2_HOST }} "
+            cd ${{ env.APP_DIR }} && \
+            if [ -d dist ]; then
+              rm -rf dist.backup.2 2>/dev/null || true
+              mv dist.backup.1 dist.backup.2 2>/dev/null || true
+              mv dist dist.backup.1 2>/dev/null || true
+              echo 'Backup created'
+            else
+              echo 'No existing deployment to backup'
+            fi
+          " || echo "Backup step completed"
+
+      - name: Deploy to VM2
+        run: |
+          scp deploy.tar.gz ${{ secrets.VM_USER }}@${{ secrets.VM2_HOST }}:${{ env.APP_DIR }}/
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM2_HOST }} "
+            cd ${{ env.APP_DIR }} && \
+            tar -xzvf deploy.tar.gz && \
+            cp -r deploy/* . && \
+            rm -rf deploy deploy.tar.gz && \
+            npm ci --omit=dev --omit=optional --ignore-scripts && \
+            node node_modules/ffmpeg-static/install.js && \
+            grep -q '^OPENROUTER_API_KEY=' .env 2>/dev/null && sed -i 's|^OPENROUTER_API_KEY=.*|OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}|' .env || echo 'OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}' >> .env && \
+            grep -q '^BOT_NOTIFY_CHANNEL_ID=' .env 2>/dev/null && sed -i 's|^BOT_NOTIFY_CHANNEL_ID=.*|BOT_NOTIFY_CHANNEL_ID=${{ vars.BOT_NOTIFY_CHANNEL_ID }}|' .env || echo 'BOT_NOTIFY_CHANNEL_ID=${{ vars.BOT_NOTIFY_CHANNEL_ID }}' >> .env && \
+            pm2 delete ${{ env.PM2_APP_NAME }} 2>/dev/null || true && \
+            VM_NAME=VM-DISC-AI-002 pm2 start dist/index.js --name ${{ env.PM2_APP_NAME }} && \
+            pm2 save
+          "
+
+      - name: Health check VM2
+        run: |
+          sleep 5
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM2_HOST }} "
+            pm2 list | grep -q '${{ env.PM2_APP_NAME }}.*online' && echo 'VM2 healthy' || (echo 'VM2 unhealthy' && exit 1)
+          "
+
+  notify:
+    needs: [deploy-vm1, deploy-vm2]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- VM1 (${{ secrets.VM1_HOST }}): ${{ needs.deploy-vm1.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- VM2 (${{ secrets.VM2_HOST }}): ${{ needs.deploy-vm2.result }}" >> $GITHUB_STEP_SUMMARY
