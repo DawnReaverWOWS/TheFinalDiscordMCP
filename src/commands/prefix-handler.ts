@@ -21,6 +21,7 @@ import {
   getSuggestions,
   AVAILABLE_VOICES
 } from '../voice-settings.js';
+import { musicService } from '../services/music-service.js';
 import {
   getFullPlayerInfo,
   getFullClanInfo,
@@ -1978,7 +1979,12 @@ export class PrefixCommandHandler {
         break;
       }
 
-      case 'play': {
+      // ============================================
+      // MUSIC COMMANDS
+      // ============================================
+      case 'play':
+      case 'p':
+      case 'music': {
         // Check voice priority
         const playVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
         if (!playVoiceCheck.allowed) {
@@ -1986,41 +1992,106 @@ export class PrefixCommandHandler {
           return;
         }
 
-        const audioUrl = args[0];
-        if (!audioUrl) {
-          await message.reply('Usage: `!play <audioUrl>`');
+        const query = args.join(' ');
+        if (!query) {
+          await message.reply('🎵 **Music Commands:**\n`!play <song name or YouTube/Spotify URL>` - Play a song\n`!skip` - Skip current song\n`!stop` - Stop and clear queue\n`!pause` - Pause playback\n`!resume` - Resume playback\n`!queue` / `!q` - View queue\n`!np` - Now playing\n`!volume <0-150>` - Set volume\n`!loop` - Toggle loop');
           return;
         }
-        // SECURITY: Validate audio URL to prevent SSRF attacks
-        const urlCheck = SecurityUtils.isValidAudioUrl(audioUrl);
-        if (!urlCheck.valid) {
-          await message.reply(`⚠️ Invalid URL: ${urlCheck.reason}`);
+
+        if ('sendTyping' in message.channel) {
+          await message.channel.sendTyping();
+        }
+
+        const playResult = await musicService.play(
+          message.guild!,
+          message.member!,
+          query,
+          message.channel.id
+        );
+
+        if (playResult.embed) {
+          await message.reply({ embeds: [playResult.embed] });
+        } else {
+          await message.reply(playResult.message);
+        }
+        break;
+      }
+
+      case 'skip':
+      case 's': {
+        const playVoiceCheck2 = canUseVoiceCommand(guildId, message.author.id);
+        if (!playVoiceCheck2.allowed) {
+          await message.reply(playVoiceCheck2.reason!);
           return;
         }
-        if (urlCheck.reason) {
-          // URL is valid but not in trusted list - warn user
-          await message.reply(`⚠️ Warning: ${urlCheck.reason}`);
-        }
-        const result = await this.discordService.playAudio(guildId, audioUrl);
-        await message.reply(result);
+
+        const skipResult = musicService.skip(guildId);
+        await message.reply(skipResult.message);
         break;
       }
 
       case 'stop': {
-        // Check voice priority
         const stopVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
         if (!stopVoiceCheck.allowed) {
           await message.reply(stopVoiceCheck.reason!);
           return;
         }
 
-        const result = await this.discordService.stopAudio(guildId);
-        await message.reply(result);
+        const stopResult = musicService.stop(guildId);
+        await message.reply(stopResult.message);
         break;
       }
 
-      case 'volume': {
-        // Check voice priority
+      case 'pause': {
+        const pauseVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
+        if (!pauseVoiceCheck.allowed) {
+          await message.reply(pauseVoiceCheck.reason!);
+          return;
+        }
+
+        const pauseResult = musicService.pause(guildId);
+        await message.reply(pauseResult.message);
+        break;
+      }
+
+      case 'resume':
+      case 'unpause': {
+        const resumeVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
+        if (!resumeVoiceCheck.allowed) {
+          await message.reply(resumeVoiceCheck.reason!);
+          return;
+        }
+
+        const resumeResult = musicService.resume(guildId);
+        await message.reply(resumeResult.message);
+        break;
+      }
+
+      case 'queue':
+      case 'q': {
+        const queueEmbed = musicService.getQueueEmbed(guildId);
+        if (queueEmbed) {
+          await message.reply({ embeds: [queueEmbed] });
+        } else {
+          await message.reply('📋 The queue is empty. Use `!play <song>` to add music!');
+        }
+        break;
+      }
+
+      case 'np':
+      case 'nowplaying':
+      case 'current': {
+        const npEmbed = musicService.getNowPlaying(guildId);
+        if (npEmbed) {
+          await message.reply({ embeds: [npEmbed] });
+        } else {
+          await message.reply('🎵 Nothing is playing right now.');
+        }
+        break;
+      }
+
+      case 'volume':
+      case 'vol': {
         const volVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
         if (!volVoiceCheck.allowed) {
           await message.reply(volVoiceCheck.reason!);
@@ -2028,12 +2099,25 @@ export class PrefixCommandHandler {
         }
 
         const vol = parseInt(args[0]);
-        if (isNaN(vol) || vol < 0 || vol > 100) {
-          await message.reply('Usage: `!volume <0-100>`');
+        if (isNaN(vol) || vol < 0 || vol > 150) {
+          await message.reply('Usage: `!volume <0-150>`');
           return;
         }
-        const result = await this.discordService.setVolume(guildId, vol);
-        await message.reply(result);
+        const volResult = musicService.setVolume(guildId, vol);
+        await message.reply(volResult.message);
+        break;
+      }
+
+      case 'loop':
+      case 'repeat': {
+        const loopVoiceCheck = canUseVoiceCommand(guildId, message.author.id);
+        if (!loopVoiceCheck.allowed) {
+          await message.reply(loopVoiceCheck.reason!);
+          return;
+        }
+
+        const loopResult = musicService.toggleLoop(guildId);
+        await message.reply(loopResult.message);
         break;
       }
 
@@ -2794,7 +2878,9 @@ export class PrefixCommandHandler {
 
 **Webhooks:** \`!createwebhook\` \`!deletewebhook\` \`!webhooks\` \`!webhooksend\`
 
-**Voice/TTS:** \`!join\` \`!leave\` \`!say\` \`!voices\` \`!setvoice\` \`!lockvoice\` \`!unlockvoice\` \`!voicestatus\` \`!play\` \`!stop\` \`!volume\`
+**Voice/TTS:** \`!join\` \`!leave\` \`!say\` \`!voices\` \`!setvoice\` \`!lockvoice\` \`!unlockvoice\` \`!voicestatus\`
+
+**Music:** \`!play\` \`!skip\` \`!stop\` \`!pause\` \`!resume\` \`!queue\` \`!np\` \`!volume\` \`!loop\`
 
 **Events:** \`!createevent\` \`!editevent\` \`!deleteevent\` \`!events\`
 
