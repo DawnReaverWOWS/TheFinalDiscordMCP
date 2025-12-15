@@ -141,12 +141,132 @@ const ADMIN_ONLY_COMMANDS = [
   'button', 'selectmenu'
 ];
 
-// Commands that ONLY the bot owner can use (role permission changes)
+// ============================================
+// SECURITY TIERS - Command Restrictions
+// ============================================
+
+// TIER 1: Commands that ONLY the bot owner can use
+// These are the most dangerous/destructive commands
 const BOT_OWNER_ONLY_COMMANDS = [
-  'createrole',      // Creating roles with permissions
-  'deleterole',      // Deleting roles
-  'editrole',        // Editing role name/color/permissions
-  'setrolepositions' // Changing role hierarchy
+  // Role management (can break server hierarchy)
+  'createrole',           // Creating roles with permissions
+  'deleterole',           // Deleting roles
+  'editrole',             // Editing role name/color/permissions
+  'setrolepositions',     // Changing role hierarchy
+
+  // Server-wide destructive actions
+  'prune',                // Mass-kick inactive members (EXTREMELY DANGEROUS)
+  'editserver',           // Change server name/icon/settings
+
+  // Automod (can break server moderation)
+  'createautomod',        // Create automod rules
+  'editautomod',          // Edit automod rules
+  'deleteautomod',        // Delete automod rules
+
+  // Templates (can affect server structure)
+  'createtemplate',       // Create server templates
+  'synctemplate',         // Sync templates
+  'deletetemplate',       // Delete templates
+
+  // Mass operations
+  'bulkprivacy',          // Mass change channel privacy
+  'organize',             // Mass organize channels
+  'setchannelpositions',  // Mass reorder channels
+];
+
+// TIER 2: Commands restricted to Admins (requires Administrator permission)
+const ADMIN_REQUIRED_COMMANDS = [
+  // Channel destruction/creation
+  'deletechannel',        // Delete channels
+  'deletecategory',       // Delete categories
+  'createchannel',        // Create text channels
+  'createvoice',          // Create voice channels
+  'createforum',          // Create forum channels
+  'createannouncement',   // Create announcement channels
+  'createstage',          // Create stage channels
+  'createcategory',       // Create categories
+
+  // Channel management
+  'editchannel',          // Edit channel settings
+  'setchannelposition',   // Move single channel
+  'movechannel',          // Move channel to category
+  'setchannelprivate',    // Make channel private
+  'setcategoryprivate',   // Make category private
+  'setchannelperms',      // Set channel permissions
+  'channelperms',         // View/edit channel permissions
+  'syncchannelperms',     // Sync channel permissions
+
+  // Webhook management (can be used for impersonation)
+  'createwebhook',        // Create webhooks
+  'deletewebhook',        // Delete webhooks
+
+  // Server assets
+  'createemoji',          // Create emojis
+  'deleteemoji',          // Delete emojis
+  'createsticker',        // Create stickers
+  'deletesticker',        // Delete stickers
+
+  // Events
+  'createevent',          // Create server events
+  'deleteevent',          // Delete events
+  'editevent',            // Edit events
+
+  // Invites management
+  'deleteinvite',         // Delete invites
+
+  // Server settings
+  'editwelcome',          // Edit welcome screen
+  'setwidget',            // Set widget settings
+  'button',               // Create interactive buttons
+  'selectmenu',           // Create select menus
+];
+
+// TIER 3: Commands restricted to Moderators (Kick/Ban/ManageMessages permissions)
+const MOD_REQUIRED_COMMANDS = [
+  // Member moderation
+  'kick',                 // Kick members
+  'ban',                  // Ban members
+  'unban',                // Unban members
+  'timeout',              // Timeout members
+  'removetimeout',        // Remove timeout
+  'untimeout',            // Alias for removetimeout
+  'editmember',           // Edit member nickname
+
+  // Message moderation
+  'bulkdelete',           // Mass delete messages
+  'purge',                // Alias for bulkdelete
+  'clearreactions',       // Clear all reactions
+  'clearemoji',           // Clear specific emoji reactions
+
+  // Thread moderation
+  'lockthread',           // Lock threads
+  'unlockthread',         // Unlock threads
+  'archivethread',        // Archive threads
+
+  // Audit/logs access
+  'auditlog',             // View audit logs
+  'audit',                // Alias for auditlog
+  'bans',                 // View ban list
+  'getban',               // Get specific ban info
+];
+
+// TIER 4: Disabled by default (high abuse potential)
+// These commands are COMPLETELY DISABLED unless bot owner enables them
+const DISABLED_BY_DEFAULT_COMMANDS = [
+  // DM commands (harassment potential)
+  'dm',                   // Send DMs
+  'editdm',               // Edit DM messages
+  'deletedm',             // Delete DM messages
+  'readdms',              // Read DM history
+
+  // Message manipulation in channels
+  'send',                 // Send messages as bot
+  'edit',                 // Edit bot messages
+  'delete',               // Delete messages
+  'webhooksend',          // Send via webhook (impersonation)
+
+  // Data export
+  'exportchat',           // Export chat history
 ];
 
 // Commands that only Commander or Executive Officer (XO/Co-Commander) can use
@@ -227,26 +347,81 @@ export class PrefixCommandHandler {
 
     const userId = message.author.id;
     const botOwnerId = process.env.BOT_OWNER_ID;
+    const isOwner = botOwnerId && userId === botOwnerId;
+    const isServerOwner = message.guild?.ownerId === userId;
 
-    // Check if this is a bot owner only command (role permission management)
-    if (BOT_OWNER_ONLY_COMMANDS.includes(command)) {
-      // Only the bot owner can use these commands
-      if (!botOwnerId || userId !== botOwnerId) {
+    // ============================================
+    // TIER 4: DISABLED BY DEFAULT
+    // These commands are completely disabled unless owner enables them
+    // ============================================
+    if (DISABLED_BY_DEFAULT_COMMANDS.includes(command)) {
+      // Only bot owner can use these (effectively disabled for everyone else)
+      if (!isOwner) {
         return {
           allowed: false,
-          reason: '🔒 **Role management commands are restricted to the bot owner only.**\nOnly the bot owner can create, delete, edit roles, or change role positions.'
+          reason: '🚫 **This command is disabled for security reasons.**\nDM, message manipulation, and export commands are restricted to prevent abuse.'
         };
       }
-      // Owner has permission, return allowed
       return { allowed: true };
     }
 
-    // Check if this is a Commander/XO only command (role assignment)
-    if (COMMANDER_ONLY_COMMANDS.includes(command)) {
-      // Bot owner always has permission
-      if (botOwnerId && userId === botOwnerId) {
-        return { allowed: true };
+    // ============================================
+    // TIER 1: BOT OWNER ONLY
+    // Most dangerous/destructive commands
+    // ============================================
+    if (BOT_OWNER_ONLY_COMMANDS.includes(command)) {
+      if (!isOwner) {
+        return {
+          allowed: false,
+          reason: '🔒 **This command is restricted to the bot owner only.**\nThis includes role management, server-wide changes, automod, templates, and mass operations.'
+        };
       }
+      return { allowed: true };
+    }
+
+    // ============================================
+    // TIER 2: ADMIN REQUIRED
+    // Requires Discord Administrator permission
+    // ============================================
+    if (ADMIN_REQUIRED_COMMANDS.includes(command)) {
+      if (isOwner) return { allowed: true };
+
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return {
+          allowed: false,
+          reason: '🔒 **This command requires Administrator permission.**\nChannel management, webhooks, server assets, and events require admin access.'
+        };
+      }
+      return { allowed: true };
+    }
+
+    // ============================================
+    // TIER 3: MODERATOR REQUIRED
+    // Requires moderation permissions (Kick/Ban/ManageMessages)
+    // ============================================
+    if (MOD_REQUIRED_COMMANDS.includes(command)) {
+      if (isOwner) return { allowed: true };
+
+      // Check for any moderation permission
+      const hasModPerms = member.permissions.has(PermissionFlagsBits.KickMembers) ||
+                          member.permissions.has(PermissionFlagsBits.BanMembers) ||
+                          member.permissions.has(PermissionFlagsBits.ManageMessages) ||
+                          member.permissions.has(PermissionFlagsBits.ModerateMembers);
+
+      if (!hasModPerms) {
+        return {
+          allowed: false,
+          reason: '🔒 **This command requires Moderator permissions.**\nYou need Kick Members, Ban Members, Moderate Members, or Manage Messages permission.'
+        };
+      }
+      return { allowed: true };
+    }
+
+    // ============================================
+    // COMMANDER/XO ONLY (Role Assignment)
+    // ============================================
+    if (COMMANDER_ONLY_COMMANDS.includes(command)) {
+      if (isOwner) return { allowed: true };
 
       // Check if user has a Commander or XO role
       const hasCommanderRole = member.roles.cache.some(role =>
@@ -255,45 +430,51 @@ export class PrefixCommandHandler {
         )
       );
 
-      // Also allow server owner
-      const isServerOwner = message.guild?.ownerId === userId;
-
       if (!hasCommanderRole && !isServerOwner) {
         return {
           allowed: false,
           reason: '🔒 **Role assignment is restricted to Commanders and Executive Officers only.**\nYou need a Commander, Co-Commander, or Executive Officer role to assign or remove roles from members.'
         };
       }
+      return { allowed: true };
     }
 
-    // Check granular permissions first
+    // ============================================
+    // GRANULAR DISCORD PERMISSIONS
+    // Commands mapped to specific Discord permissions
+    // ============================================
     const requiredPerms = COMMAND_PERMISSIONS[command];
     if (requiredPerms && requiredPerms.length > 0) {
-      // Bot owner bypasses Discord permission checks
-      if (botOwnerId && userId === botOwnerId) {
-        return { allowed: true };
-      }
-      // Must have ALL required permissions
+      if (isOwner) return { allowed: true };
+
       const hasPerms = requiredPerms.every(perm => member.permissions.has(perm));
       if (!hasPerms) {
-        return { allowed: false, reason: 'You do not have the required Discord permissions for this command.' };
+        return {
+          allowed: false,
+          reason: '❌ You do not have the required Discord permissions for this command.'
+        };
       }
       return { allowed: true };
     }
 
-    // Admin-only commands fallback (for unmapped commands that need admin)
+    // ============================================
+    // LEGACY ADMIN-ONLY COMMANDS FALLBACK
+    // ============================================
     if (ADMIN_ONLY_COMMANDS.includes(command)) {
-      // Bot owner bypasses
-      if (botOwnerId && userId === botOwnerId) {
-        return { allowed: true };
-      }
+      if (isOwner) return { allowed: true };
+
       if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return { allowed: false, reason: 'This command requires Administrator permission.' };
+        return {
+          allowed: false,
+          reason: '🔒 This command requires Administrator permission.'
+        };
       }
       return { allowed: true };
     }
 
-    // Other commands - anyone can use
+    // ============================================
+    // SAFE COMMANDS - Everyone can use
+    // ============================================
     return { allowed: true };
   }
 
