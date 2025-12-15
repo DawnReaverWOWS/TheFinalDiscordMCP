@@ -41,6 +41,13 @@ export interface ClanSearchResult {
   created_at: number;
 }
 
+export interface ClanMemberData {
+  account_id: number;
+  account_name: string;
+  role: string;
+  joined_at: number;
+}
+
 export interface ClanFullInfo {
   clan_id: number;
   tag: string;
@@ -48,6 +55,7 @@ export interface ClanFullInfo {
   description: string | null;
   members_count: number;
   members_ids: number[];
+  members?: Record<string, ClanMemberData>;
   leader_id: number;
   leader_name: string;
   creator_id: number;
@@ -60,13 +68,23 @@ export interface ClanFullInfo {
   is_clan_disbanded: boolean;
 }
 
+export interface ClanMember {
+  accountId: number;
+  nickname: string;
+  role: string;
+  joinedAt: number;
+}
+
 export interface FormattedClanInfo {
   clanId: number;
   tag: string;
   name: string;
   description: string | null;
   membersCount: number;
+  membersIds: number[];
+  members?: ClanMember[];
   leaderName: string;
+  leaderId: number;
   creatorName: string;
   createdAt: number;
   updatedAt: number;
@@ -544,8 +562,9 @@ export async function searchClan(query: string): Promise<ClanSearchResult | null
 /**
  * Get detailed clan info by clan ID
  */
-export async function getClanInfo(clanId: number): Promise<ClanFullInfo | null> {
-  const url = `${API_BASE_URL}/clans/info/?application_id=${APP_ID}&clan_id=${clanId}`;
+export async function getClanInfo(clanId: number, includeMembers: boolean = false): Promise<ClanFullInfo | null> {
+  const extra = includeMembers ? '&extra=members' : '';
+  const url = `${API_BASE_URL}/clans/info/?application_id=${APP_ID}&clan_id=${clanId}${extra}`;
   const response = await fetch(url);
   const data: ApiResponse = await response.json();
 
@@ -574,17 +593,45 @@ export async function searchClanSuggestions(query: string, limit: number = 5): P
 /**
  * Get full formatted clan info
  */
-export async function getFullClanInfo(query: string): Promise<FormattedClanInfo | null> {
+export async function getFullClanInfo(query: string, includeMembers: boolean = false): Promise<FormattedClanInfo | null> {
   // Search for clan
   const clanSearch = await searchClan(query);
   if (!clanSearch) {
     return null;
   }
 
-  // Get detailed info
-  const clanInfo = await getClanInfo(clanSearch.clan_id);
+  // Get detailed info (with members if requested)
+  const clanInfo = await getClanInfo(clanSearch.clan_id, includeMembers);
   if (!clanInfo) {
     return null;
+  }
+
+  // Convert members from API format to our format
+  let members: ClanMember[] | undefined;
+  if (clanInfo.members) {
+    members = Object.values(clanInfo.members)
+      .map(m => ({
+        accountId: m.account_id,
+        nickname: m.account_name,
+        role: m.role,
+        joinedAt: m.joined_at
+      }))
+      .sort((a, b) => {
+        // Sort by role priority: commander > executive_officer > recruitment_officer > commissioned_officer > officer > private
+        const rolePriority: Record<string, number> = {
+          'commander': 0,
+          'executive_officer': 1,
+          'recruitment_officer': 2,
+          'commissioned_officer': 3,
+          'officer': 4,
+          'private': 5
+        };
+        const aPriority = rolePriority[a.role] ?? 6;
+        const bPriority = rolePriority[b.role] ?? 6;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        // Same role, sort alphabetically
+        return a.nickname.localeCompare(b.nickname);
+      });
   }
 
   return {
@@ -593,7 +640,10 @@ export async function getFullClanInfo(query: string): Promise<FormattedClanInfo 
     name: clanInfo.name,
     description: clanInfo.description,
     membersCount: clanInfo.members_count,
+    membersIds: clanInfo.members_ids || [],
+    members,
     leaderName: clanInfo.leader_name,
+    leaderId: clanInfo.leader_id,
     creatorName: clanInfo.creator_name,
     createdAt: clanInfo.created_at,
     updatedAt: clanInfo.updated_at,

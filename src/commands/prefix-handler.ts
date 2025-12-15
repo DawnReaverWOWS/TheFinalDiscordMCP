@@ -357,7 +357,8 @@ export class PrefixCommandHandler {
         }
 
         try {
-          const clanInfo = await getFullClanInfo(clanQuery);
+          // Fetch clan info WITH members list
+          const clanInfo = await getFullClanInfo(clanQuery, true);
 
           if (!clanInfo) {
             // Try to find suggestions
@@ -375,22 +376,114 @@ export class PrefixCommandHandler {
             return;
           }
 
-          let response = `**[${clanInfo.tag}] ${clanInfo.name}**\n\n`;
+          // Build main clan info embed
+          const mainEmbed = new EmbedBuilder()
+            .setColor(0x1E90FF)
+            .setTitle(`[${clanInfo.tag}] ${clanInfo.name}`)
+            .setURL(`https://wows-numbers.com/clan/${clanInfo.clanId},${clanInfo.tag}/`);
+
           if (clanInfo.description) {
-            response += `📝 ${clanInfo.description.substring(0, 200)}${clanInfo.description.length > 200 ? '...' : ''}\n\n`;
+            mainEmbed.setDescription(clanInfo.description.substring(0, 300) + (clanInfo.description.length > 300 ? '...' : ''));
           }
-          response += `👥 **Members:** ${clanInfo.membersCount}\n`;
-          response += `👑 **Leader:** ${clanInfo.leaderName}\n`;
-          response += `🎖️ **Creator:** ${clanInfo.creatorName}\n`;
 
           const createdDate = new Date(clanInfo.createdAt * 1000);
-          response += `📅 **Created:** ${createdDate.toLocaleDateString()}`;
+          let infoText = `👥 **Members:** ${clanInfo.membersCount}\n`;
+          infoText += `👑 **Leader:** ${clanInfo.leaderName}\n`;
+          infoText += `🎖️ **Creator:** ${clanInfo.creatorName}\n`;
+          infoText += `📅 **Created:** ${createdDate.toLocaleDateString()}`;
 
           if (clanInfo.oldTag || clanInfo.oldName) {
-            response += `\n📜 **Formerly:** [${clanInfo.oldTag || clanInfo.tag}] ${clanInfo.oldName || clanInfo.name}`;
+            infoText += `\n📜 **Formerly:** [${clanInfo.oldTag || clanInfo.tag}] ${clanInfo.oldName || clanInfo.name}`;
           }
 
-          await message.reply(response);
+          mainEmbed.addFields({ name: 'Clan Info', value: infoText });
+
+          // Build member list
+          if (clanInfo.members && clanInfo.members.length > 0) {
+            // Role emoji mapping
+            const roleEmoji: Record<string, string> = {
+              'commander': '👑',
+              'executive_officer': '⭐',
+              'recruitment_officer': '📋',
+              'commissioned_officer': '🎖️',
+              'officer': '⚔️',
+              'private': '👤'
+            };
+
+            const roleNames: Record<string, string> = {
+              'commander': 'Commander',
+              'executive_officer': 'Executive Officer',
+              'recruitment_officer': 'Recruitment Officer',
+              'commissioned_officer': 'Commissioned Officer',
+              'officer': 'Officer',
+              'private': 'Member'
+            };
+
+            // Group members by role
+            const membersByRole: Record<string, string[]> = {};
+            for (const member of clanInfo.members) {
+              const role = member.role || 'private';
+              if (!membersByRole[role]) {
+                membersByRole[role] = [];
+              }
+              membersByRole[role].push(member.nickname);
+            }
+
+            // Build member list string (sorted by role priority)
+            const roleOrder = ['commander', 'executive_officer', 'recruitment_officer', 'commissioned_officer', 'officer', 'private'];
+            let memberList = '';
+
+            for (const role of roleOrder) {
+              if (membersByRole[role] && membersByRole[role].length > 0) {
+                const emoji = roleEmoji[role] || '👤';
+                const roleName = roleNames[role] || role;
+                const members = membersByRole[role].join(', ');
+                memberList += `${emoji} **${roleName}${membersByRole[role].length > 1 ? 's' : ''}:** ${members}\n`;
+              }
+            }
+
+            // Discord embed field limit is 1024 chars
+            if (memberList.length > 1024) {
+              // Split into multiple fields if too long
+              const chunks: string[] = [];
+              let currentChunk = '';
+
+              for (const role of roleOrder) {
+                if (membersByRole[role] && membersByRole[role].length > 0) {
+                  const emoji = roleEmoji[role] || '👤';
+                  const roleName = roleNames[role] || role;
+                  const members = membersByRole[role].join(', ');
+                  const line = `${emoji} **${roleName}${membersByRole[role].length > 1 ? 's' : ''}:** ${members}\n`;
+
+                  if (currentChunk.length + line.length > 1000) {
+                    if (currentChunk) chunks.push(currentChunk);
+                    currentChunk = line;
+                  } else {
+                    currentChunk += line;
+                  }
+                }
+              }
+              if (currentChunk) chunks.push(currentChunk);
+
+              // Add as multiple fields
+              chunks.forEach((chunk, i) => {
+                mainEmbed.addFields({
+                  name: i === 0 ? `Roster (${clanInfo.membersCount})` : '​', // Zero-width space for continuation
+                  value: chunk
+                });
+              });
+            } else {
+              mainEmbed.addFields({
+                name: `Roster (${clanInfo.membersCount})`,
+                value: memberList || 'No members found'
+              });
+            }
+          }
+
+          mainEmbed.setFooter({ text: 'World of Warships NA' });
+          mainEmbed.setTimestamp();
+
+          await message.reply({ embeds: [mainEmbed] });
         } catch (error) {
           console.error('WoWS clan lookup error:', error);
           await message.reply(`❌ Error looking up clan: ${error instanceof Error ? error.message : 'Unknown error'}`);
