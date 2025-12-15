@@ -1665,7 +1665,7 @@ export class PrefixCommandHandler {
         // Callback to notify user when provider fails and retrying
         const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
           try {
-            await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+            await (message.channel as TextChannel).send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
             await (message.channel as TextChannel).sendTyping();
           } catch {
             // Ignore errors sending retry message
@@ -1702,7 +1702,7 @@ export class PrefixCommandHandler {
         // Callback to notify user when provider fails and retrying
         const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
           try {
-            await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+            await (message.channel as TextChannel).send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
             await (message.channel as TextChannel).sendTyping();
           } catch {
             // Ignore errors sending retry message
@@ -2700,7 +2700,7 @@ export class PrefixCommandHandler {
     // Callback to notify user when provider fails and retrying
     const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
       try {
-        await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+        await (message.channel as TextChannel).send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
         if ('sendTyping' in message.channel) {
           await message.channel.sendTyping();
         }
