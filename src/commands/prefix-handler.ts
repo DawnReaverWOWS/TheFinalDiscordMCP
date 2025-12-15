@@ -140,6 +140,24 @@ const ADMIN_ONLY_COMMANDS = [
   'button', 'selectmenu'
 ];
 
+// Commands that ONLY the bot owner can use (role permission changes)
+const BOT_OWNER_ONLY_COMMANDS = [
+  'createrole',      // Creating roles with permissions
+  'deleterole',      // Deleting roles
+  'editrole',        // Editing role name/color/permissions
+  'setrolepositions' // Changing role hierarchy
+];
+
+// Commands that only Commander or Executive Officer (XO/Co-Commander) can use
+// These are Discord role names to check for - case insensitive
+const COMMANDER_ROLE_NAMES = ['commander', 'co-commander', 'executive officer', 'xo', 'clan leader', 'deputy commander'];
+
+// Role assignment commands restricted to Commander/XO only
+const COMMANDER_ONLY_COMMANDS = [
+  'addrole',    // Assigning roles to members
+  'removerole'  // Removing roles from members
+];
+
 export class PrefixCommandHandler {
   private discordService: DiscordService;
   private breadHistory: Map<string, number[]> = new Map();
@@ -186,8 +204,9 @@ export class PrefixCommandHandler {
     const sanitizedArgs = SecurityUtils.sanitizeCommandArgs(args);
 
     // Permission check
-    if (!this.hasPermission(message, command)) {
-      await message.reply('You do not have permission to use this command.');
+    const permissionResult = this.checkPermission(message, command);
+    if (!permissionResult.allowed) {
+      await message.reply(permissionResult.reason || 'You do not have permission to use this command.');
       return;
     }
 
@@ -201,24 +220,80 @@ export class PrefixCommandHandler {
     }
   }
 
-  private hasPermission(message: Message, command: string): boolean {
+  private checkPermission(message: Message, command: string): { allowed: boolean; reason?: string } {
     const member = message.member;
-    if (!member) return false;
+    if (!member) return { allowed: false, reason: 'Could not verify your server membership.' };
+
+    const userId = message.author.id;
+    const botOwnerId = process.env.BOT_OWNER_ID;
+
+    // Check if this is a bot owner only command (role permission management)
+    if (BOT_OWNER_ONLY_COMMANDS.includes(command)) {
+      // Only the bot owner can use these commands
+      if (!botOwnerId || userId !== botOwnerId) {
+        return {
+          allowed: false,
+          reason: '🔒 **Role management commands are restricted to the bot owner only.**\nOnly the bot owner can create, delete, edit roles, or change role positions.'
+        };
+      }
+      // Owner has permission, return allowed
+      return { allowed: true };
+    }
+
+    // Check if this is a Commander/XO only command (role assignment)
+    if (COMMANDER_ONLY_COMMANDS.includes(command)) {
+      // Bot owner always has permission
+      if (botOwnerId && userId === botOwnerId) {
+        return { allowed: true };
+      }
+
+      // Check if user has a Commander or XO role
+      const hasCommanderRole = member.roles.cache.some(role =>
+        COMMANDER_ROLE_NAMES.some(name =>
+          role.name.toLowerCase().includes(name.toLowerCase())
+        )
+      );
+
+      // Also allow server owner
+      const isServerOwner = message.guild?.ownerId === userId;
+
+      if (!hasCommanderRole && !isServerOwner) {
+        return {
+          allowed: false,
+          reason: '🔒 **Role assignment is restricted to Commanders and Executive Officers only.**\nYou need a Commander, Co-Commander, or Executive Officer role to assign or remove roles from members.'
+        };
+      }
+    }
 
     // Check granular permissions first
     const requiredPerms = COMMAND_PERMISSIONS[command];
     if (requiredPerms && requiredPerms.length > 0) {
+      // Bot owner bypasses Discord permission checks
+      if (botOwnerId && userId === botOwnerId) {
+        return { allowed: true };
+      }
       // Must have ALL required permissions
-      return requiredPerms.every(perm => member.permissions.has(perm));
+      const hasPerms = requiredPerms.every(perm => member.permissions.has(perm));
+      if (!hasPerms) {
+        return { allowed: false, reason: 'You do not have the required Discord permissions for this command.' };
+      }
+      return { allowed: true };
     }
 
     // Admin-only commands fallback (for unmapped commands that need admin)
     if (ADMIN_ONLY_COMMANDS.includes(command)) {
-      return member.permissions.has(PermissionFlagsBits.Administrator);
+      // Bot owner bypasses
+      if (botOwnerId && userId === botOwnerId) {
+        return { allowed: true };
+      }
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return { allowed: false, reason: 'This command requires Administrator permission.' };
+      }
+      return { allowed: true };
     }
 
     // Other commands - anyone can use
-    return true;
+    return { allowed: true };
   }
 
   private async executeCommand(message: Message, command: string, args: string[]): Promise<void> {
