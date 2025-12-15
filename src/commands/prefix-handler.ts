@@ -1,7 +1,7 @@
 import { Message, PermissionFlagsBits, TextChannel, PermissionResolvable, EmbedBuilder } from 'discord.js';
 import { DiscordService } from '../discord-service.js';
 import { SecurityUtils, COMMAND_COOLDOWNS } from '../core/SecurityUtils.js';
-import { getAIService } from '../ai-service.js';
+import { getAIService, type OnRetryCallback } from '../ai-service.js';
 import { generateImageUrl, getAvailableModels } from '../image-service.js';
 import {
   isCreator,
@@ -1662,8 +1662,18 @@ export class PrefixCommandHandler {
         // Show typing indicator while processing
         await (message.channel as TextChannel).sendTyping();
 
+        // Callback to notify user when provider fails and retrying
+        const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
+          try {
+            await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+            await (message.channel as TextChannel).sendTyping();
+          } catch {
+            // Ignore errors sending retry message
+          }
+        };
+
         try {
-          const response = await aiService.chat(question);
+          const response = await aiService.chat(question, undefined, onRetry);
           // Split long responses if needed
           if (response.length > 1900) {
             await message.reply(response.substring(0, 1900) + '...');
@@ -1689,8 +1699,18 @@ export class PrefixCommandHandler {
         // Show typing indicator while processing
         await (message.channel as TextChannel).sendTyping();
 
+        // Callback to notify user when provider fails and retrying
+        const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
+          try {
+            await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+            await (message.channel as TextChannel).sendTyping();
+          } catch {
+            // Ignore errors sending retry message
+          }
+        };
+
         try {
-          const response = await aiService.chat(question);
+          const response = await aiService.chat(question, undefined, onRetry);
 
           // Reply in text channel
           if (response.length > 1900) {
@@ -2677,10 +2697,22 @@ export class PrefixCommandHandler {
       await message.channel.sendTyping();
     }
 
+    // Callback to notify user when provider fails and retrying
+    const onRetry: OnRetryCallback = async (failedProvider, nextProvider, error) => {
+      try {
+        await message.channel.send(`⚠️ \`${failedProvider}\` failed, trying \`${nextProvider}\`...`);
+        if ('sendTyping' in message.channel) {
+          await message.channel.sendTyping();
+        }
+      } catch {
+        // Ignore errors sending retry message
+      }
+    };
+
     try {
       // Add context about who's asking
       const context = `User ${message.author.username} is asking in the ${message.guild?.name || 'DM'} server.`;
-      const response = await aiService.chat(question, context);
+      const response = await aiService.chat(question, context, onRetry);
 
       // Split long responses if needed
       if (response.length > 1900) {

@@ -249,6 +249,8 @@ const PROVIDERS: ProviderConfig[] = [
   },
 ];
 
+export type OnRetryCallback = (failedProvider: string, nextProvider: string, error: string) => void;
+
 export class AIService {
   private readonly systemPrompt: string;
   private readonly availableProviders: ProviderConfig[] = [];
@@ -275,7 +277,7 @@ If anyone asks who made you or who your creator is, speak highly of them!
 Be respectful and appreciative when discussing your creator.`;
   }
 
-  async chat(userMessage: string, context?: string): Promise<string> {
+  async chat(userMessage: string, context?: string, onRetry?: OnRetryCallback): Promise<string> {
     if (this.availableProviders.length === 0) {
       throw new Error('No AI provider configured. Set DEEPSEEK_API_KEY, GOOGLE_AI_KEY, GROQ_API_KEY, or another provider in .env');
     }
@@ -292,17 +294,31 @@ Be respectful and appreciative when discussing your creator.`;
 
     const errors: string[] = [];
 
-    for (const provider of this.availableProviders) {
+    for (let i = 0; i < this.availableProviders.length; i++) {
+      const provider = this.availableProviders[i];
       try {
         const response = await this.callProvider(provider, messages);
         if (response) {
           this.lastUsedProvider = provider.name;
           return fixTTSPronunciation(response);
         }
-        errors.push(`${provider.name}: Empty response`);
+        const errMsg = 'Empty response';
+        errors.push(`${provider.name}: ${errMsg}`);
+
+        // Notify about retry if there's a next provider
+        if (onRetry && i + 1 < this.availableProviders.length) {
+          const nextProvider = this.availableProviders[i + 1];
+          onRetry(provider.name, nextProvider.name, errMsg);
+        }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
         errors.push(`${provider.name}: ${errMsg}`);
+
+        // Notify about retry if there's a next provider
+        if (onRetry && i + 1 < this.availableProviders.length) {
+          const nextProvider = this.availableProviders[i + 1];
+          onRetry(provider.name, nextProvider.name, errMsg);
+        }
       }
     }
 

@@ -216,6 +216,9 @@ All commands use the `!` prefix (except DMs which work without prefix).
 | Command | Description | Example |
 |---------|-------------|---------|
 | `!8ball <question>` | Ask the magic 8-ball | `!8ball Will I win today?` |
+| `!bread` | Get a random breadstick picture | `!bread` |
+
+**Aliases:** `!breadsticks`, `!breadstick`, `!carbs`
 
 ## Creator Mode
 

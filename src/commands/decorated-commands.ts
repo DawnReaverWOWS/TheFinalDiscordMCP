@@ -760,4 +760,79 @@ export class DecoratedCommands {
     const response = responses[Math.floor(Math.random() * responses.length)];
     await message.reply(`🎱 ${response}`);
   }
+
+  // Track shown breadstick images per guild to avoid repeats
+  private breadstickHistory: Map<string, number[]> = new Map();
+
+  // Curated list of delicious breadstick images
+  private readonly BREADSTICK_IMAGES = [
+    'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800', // Fresh breadsticks
+    'https://images.unsplash.com/photo-1549931319-a545dcf3bc73?w=800', // Garlic breadsticks
+    'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=800', // Bakery bread
+    'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=800', // Italian bread
+    'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=800', // Fresh baked
+    'https://images.unsplash.com/photo-1517433670267-08bbd4be890f?w=800', // Bread basket
+    'https://images.unsplash.com/photo-1608198093002-ad4e005f0cc3?w=800', // Breadsticks close-up
+    'https://images.unsplash.com/photo-1574478728782-f585dbe7c03f?w=800', // Artisan bread
+    'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=800', // Rustic bread
+    'https://images.unsplash.com/photo-1549903072-7e6e0bedb7fb?w=800', // Warm breadsticks
+    'https://images.unsplash.com/photo-1598373182133-52452f7691ef?w=800', // Bread rolls
+    'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800', // Baguette style
+    'https://images.unsplash.com/photo-1530610476181-d83430b64dcd?w=800', // Fresh from oven
+    'https://images.unsplash.com/photo-1587088155172-e9355df99c30?w=800', // Italian style
+    'https://images.unsplash.com/photo-1595535873420-a599195b3f4a?w=800', // Golden breadsticks
+  ];
+
+  @Category('Fun')
+  @Alias('breadsticks', 'breadstick', 'carbs')
+  @Cooldown(3)
+  @UseInterceptor(PrefixInterceptors.logging)
+  @Command({ name: 'bread', description: 'Get a random picture of delicious breadsticks 🥖', usage: '!bread' })
+  async bread(message: Message) {
+    const guildId = message.guildId || message.author.id;
+
+    // Get history for this guild/user
+    let history = this.breadstickHistory.get(guildId) || [];
+
+    // If we've shown all images, reset the history
+    if (history.length >= this.BREADSTICK_IMAGES.length) {
+      history = [];
+    }
+
+    // Find an image we haven't shown recently
+    let availableIndices = this.BREADSTICK_IMAGES
+      .map((_, i) => i)
+      .filter(i => !history.includes(i));
+
+    // Pick a random one from available
+    const randomIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+    const imageUrl = this.BREADSTICK_IMAGES[randomIndex];
+
+    // Add to history
+    history.push(randomIndex);
+    this.breadstickHistory.set(guildId, history);
+
+    // Random fun messages
+    const messages = [
+      '🥖 **Fresh breadsticks, coming right up!**',
+      '🥖 **Mmm... carbs!**',
+      '🥖 **Unlimited breadsticks? Yes please!**',
+      '🥖 **Olive Garden called, they want their breadsticks back**',
+      '🥖 **Garlic butter not included**',
+      '🥖 **Straight from the oven!**',
+      '🥖 ***chef\'s kiss***',
+      '🥖 **Breadstick delivery!**',
+      '🥖 **Warning: May cause carb cravings**',
+      '🥖 **The best thing since sliced bread... sticks**',
+    ];
+    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+
+    const embed = new EmbedBuilder()
+      .setColor(0xD4A574) // Bread-like color
+      .setDescription(randomMessage)
+      .setImage(imageUrl)
+      .setFooter({ text: `Breadstick ${history.length}/${this.BREADSTICK_IMAGES.length} 🍞` });
+
+    await message.reply({ embeds: [embed] });
+  }
 }
