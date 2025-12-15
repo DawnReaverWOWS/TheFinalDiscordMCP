@@ -5,6 +5,40 @@
 // Discord snowflake ID regex (17-20 digits)
 const SNOWFLAKE_REGEX = /^\d{17,20}$/;
 
+// Blocked slurs and offensive terms (patterns to catch evasion attempts)
+// These patterns match the word even with letter substitutions, spaces, or special chars
+const BLOCKED_CONTENT_PATTERNS: RegExp[] = [
+  // N-word and variants (catches n1gger, n!gger, nigg3r, n i g g e r, etc.)
+  /n+[\s.*_\-]*[i1!|l]+[\s.*_\-]*g+[\s.*_\-]*g*[\s.*_\-]*[e3]+[\s.*_\-]*r+s?/gi,
+  /n+[\s.*_\-]*[i1!|l]+[\s.*_\-]*g+[\s.*_\-]*g*[\s.*_\-]*[a@4]+s?/gi,
+  // F-slur and variants
+  /f+[\s.*_\-]*[a@4]+[\s.*_\-]*g+[\s.*_\-]*g*[\s.*_\-]*[o0]+[\s.*_\-]*t+s?/gi,
+  // R-word (ableist slur)
+  /r+[\s.*_\-]*[e3]+[\s.*_\-]*t+[\s.*_\-]*[a@4]+[\s.*_\-]*r+[\s.*_\-]*d+s?/gi,
+  // K-word (antisemitic)
+  /k+[\s.*_\-]*[i1!|l]+[\s.*_\-]*k+[\s.*_\-]*[e3]+[\s.*_\-]*s?/gi,
+  // C-word (racist against Asians)
+  /ch+[\s.*_\-]*[i1!|l]+[\s.*_\-]*n+[\s.*_\-]*k+s?/gi,
+  // S-word (racist against Hispanics)
+  /sp+[\s.*_\-]*[i1!|l]+[\s.*_\-]*c+s?/gi,
+  // W-word (racist)
+  /w+[\s.*_\-]*[e3]+[\s.*_\-]*t+[\s.*_\-]*b+[\s.*_\-]*[a@4]+[\s.*_\-]*c+[\s.*_\-]*k+s?/gi,
+  // T-slur (transphobic)
+  /tr+[\s.*_\-]*[a@4]+[\s.*_\-]*n+[\s.*_\-]*n+[\s.*_\-]*[yi1!]+[\s.*_\-]*[e3]?s?/gi,
+];
+
+// Additional exact match blocklist (less common but still offensive)
+const BLOCKED_EXACT_TERMS = [
+  'negro', 'negros', 'coon', 'coons', 'darkie', 'darkies',
+  'jigaboo', 'jiggaboo', 'sambo', 'spook', 'porchmonkey',
+  'beaner', 'beaners', 'wetback', 'wetbacks', 'gook', 'gooks',
+  'zipperhead', 'chink', 'chinks', 'jap', 'japs', 'nip', 'nips',
+  'kike', 'kikes', 'heeb', 'heebs', 'hymie', 'hymies',
+  'fag', 'fags', 'faggot', 'faggots', 'dyke', 'dykes',
+  'tranny', 'trannies', 'shemale', 'shemales',
+  'retard', 'retards', 'retarded', 'tard', 'tards',
+];
+
 // Allowed URL protocols for audio playback
 const ALLOWED_AUDIO_PROTOCOLS = ['https:', 'http:'];
 const ALLOWED_AUDIO_DOMAINS = [
@@ -423,6 +457,43 @@ export class SecurityUtils {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Check if text contains blocked content (slurs, hate speech, etc.)
+   * Uses both pattern matching (for evasion attempts) and exact term matching
+   */
+  static containsBlockedContent(text: string): { blocked: boolean; reason?: string } {
+    if (!text || typeof text !== 'string') {
+      return { blocked: false };
+    }
+
+    const normalizedText = text.toLowerCase();
+
+    // Check against regex patterns (catches evasion attempts like n1gger, n!gg3r, etc.)
+    for (const pattern of BLOCKED_CONTENT_PATTERNS) {
+      // Reset lastIndex for global patterns to avoid stateful bugs
+      pattern.lastIndex = 0;
+      if (pattern.test(normalizedText)) {
+        return {
+          blocked: true,
+          reason: 'Content contains inappropriate language that violates community guidelines.'
+        };
+      }
+    }
+
+    // Check exact terms with word boundaries
+    for (const term of BLOCKED_EXACT_TERMS) {
+      const wordBoundaryPattern = new RegExp(`\\b${term}\\b`, 'i');
+      if (wordBoundaryPattern.test(normalizedText)) {
+        return {
+          blocked: true,
+          reason: 'Content contains inappropriate language that violates community guidelines.'
+        };
+      }
+    }
+
+    return { blocked: false };
   }
 
   /**

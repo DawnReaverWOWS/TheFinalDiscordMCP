@@ -1712,6 +1712,12 @@ export class PrefixCommandHandler {
           await message.reply('Text too long. Maximum 500 characters.');
           return;
         }
+        // Content filter - block slurs and hate speech
+        const contentCheck = SecurityUtils.containsBlockedContent(text);
+        if (contentCheck.blocked) {
+          await message.reply('❌ I cannot say that. ' + contentCheck.reason);
+          return;
+        }
         const result = await this.discordService.speakText(guildId, text);
         await message.reply(result);
         break;
@@ -1843,7 +1849,14 @@ export class PrefixCommandHandler {
         };
 
         try {
-          const response = await aiService.chat(question, undefined, onRetry);
+          let response = await aiService.chat(question, undefined, onRetry);
+
+          // Content filter - don't send inappropriate AI responses
+          const aiContentCheck = SecurityUtils.containsBlockedContent(response);
+          if (aiContentCheck.blocked) {
+            response = "I can't respond to that in an appropriate way. Let's talk about something else!";
+          }
+
           // Split long responses if needed
           if (response.length > 1900) {
             await message.reply(response.substring(0, 1900) + '...');
@@ -1856,7 +1869,6 @@ export class PrefixCommandHandler {
         break;
       }
 
-      case 'voice':
       case 'voiceask': {
         const question = args.join(' ').trim();
         if (!question) {
@@ -1880,7 +1892,13 @@ export class PrefixCommandHandler {
         };
 
         try {
-          const response = await aiService.chat(question, undefined, onRetry);
+          let response = await aiService.chat(question, undefined, onRetry);
+
+          // Content filter - don't send or speak inappropriate AI responses
+          const voiceAiCheck = SecurityUtils.containsBlockedContent(response);
+          if (voiceAiCheck.blocked) {
+            response = "I can't respond to that in an appropriate way. Let's talk about something else!";
+          }
 
           // Reply in text channel
           if (response.length > 1900) {
@@ -3031,7 +3049,13 @@ export class PrefixCommandHandler {
     try {
       // Add context about who's asking
       const context = `User ${message.author.username} is asking in the ${message.guild?.name || 'DM'} server.`;
-      const response = await aiService.chat(question, context, onRetry);
+      let response = await aiService.chat(question, context, onRetry);
+
+      // Content filter - don't send or speak inappropriate AI responses
+      const mentionAiCheck = SecurityUtils.containsBlockedContent(response);
+      if (mentionAiCheck.blocked) {
+        response = "I can't respond to that in an appropriate way. Let's talk about something else!";
+      }
 
       // Split long responses if needed
       if (response.length > 1900) {
