@@ -142,6 +142,7 @@ const ADMIN_ONLY_COMMANDS = [
 
 export class PrefixCommandHandler {
   private discordService: DiscordService;
+  private breadHistory: Map<string, number[]> = new Map();
 
   constructor(discordService: DiscordService) {
     this.discordService = discordService;
@@ -2641,7 +2642,7 @@ export class PrefixCommandHandler {
 
 **Interactive:** \`!button\` \`!selectmenu\`
 
-**Fun:** \`!8ball\`
+**Fun:** \`!8ball\` \`!bread\`
 
 **Other:** \`!embed\` \`!userid\` \`!searchmembers\` \`!readimages\``
         ];
@@ -2659,6 +2660,70 @@ export class PrefixCommandHandler {
             await message.reply(msg);
           }
         }
+        break;
+      }
+
+      case 'bread':
+      case 'breadsticks':
+      case 'breadstick':
+      case 'carbs': {
+        const breadImages = [
+          { url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800', name: 'Artisan Breadsticks', desc: 'Classic Italian grissini - thin, crispy, and perfect for dipping in olive oil or balsamic.' },
+          { url: 'https://images.unsplash.com/photo-1549931319-a545dcf3bc73?w=800', name: 'Fresh Baguette', desc: 'A crusty French baguette with a soft, airy interior. The gold standard of bread.' },
+          { url: 'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=800', name: 'Sourdough Loaf', desc: 'Naturally leavened with wild yeast, tangy flavor, and that iconic ear crust.' },
+          { url: 'https://images.unsplash.com/photo-1598373182133-52452f7691ef?w=800', name: 'Ciabatta', desc: 'Italian slipper bread - chewy, holey, and ideal for sandwiches and paninis.' },
+          { url: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=800', name: 'Croissants', desc: 'Buttery, flaky, laminated perfection. 27 layers of pure carb heaven.' },
+          { url: 'https://images.unsplash.com/photo-1608198093002-ad4e005484ec?w=800', name: 'Pretzel Bread', desc: 'Soft, chewy, with that distinctive lye-dipped crust and coarse salt topping.' },
+          { url: 'https://images.unsplash.com/photo-1574085733277-851d9d856a3a?w=800', name: 'Focaccia', desc: 'Thick, dimpled Italian flatbread drizzled with olive oil and herbs. Chef\'s kiss.' },
+          { url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800', name: 'Olive Garden Breadsticks', desc: 'The legendary unlimited breadsticks. Soft, buttery, garlicky. A cultural icon.' },
+          { url: 'https://images.unsplash.com/photo-1600398538467-4ef7bba0a711?w=800', name: 'Challah', desc: 'Braided Jewish bread, slightly sweet and incredibly rich with eggs.' },
+          { url: 'https://images.unsplash.com/photo-1603984042729-13190fc392c0?w=800', name: 'Rye Bread', desc: 'Dense, earthy, with caraway seeds. Perfect for deli sandwiches and toast.' },
+          { url: 'https://images.unsplash.com/photo-1612240498936-65f5101365d2?w=800', name: 'Naan', desc: 'Soft, pillowy Indian flatbread. Best served hot from the tandoor with butter.' },
+          { url: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=800', name: 'Brioche', desc: 'Rich, buttery French bread that blurs the line between bread and pastry.' },
+          { url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800', name: 'Garlic Knots', desc: 'Twisted dough bombs of garlic butter and parsley. Pizza shop essential.' },
+          { url: 'https://images.unsplash.com/photo-1587241321921-91a834d6d191?w=800', name: 'Pita Bread', desc: 'Pocket bread from the Middle East. Perfect for hummus, falafel, and gyros.' }
+        ];
+
+        const guildId = message.guild?.id || 'dm';
+        let history = this.breadHistory.get(guildId) || [];
+
+        // Reset history if we've shown all breads
+        if (history.length >= breadImages.length - 1) {
+          history = [];
+        }
+
+        // Pick random bread not in recent history
+        let breadIndex: number;
+        do {
+          breadIndex = Math.floor(Math.random() * breadImages.length);
+        } while (history.includes(breadIndex));
+
+        history.push(breadIndex);
+        this.breadHistory.set(guildId, history);
+
+        const bread = breadImages[breadIndex];
+        const funMessages = [
+          '🍞 Fresh from the oven!',
+          '🥖 Carb loading initiated...',
+          '🥐 Gluten gang rise up!',
+          '🍞 *bread noises*',
+          '🥖 Unlimited breadsticks? Unlimited breadsticks.',
+          '🍞 Bread 👍',
+          '🥐 Low carb? Never heard of her.',
+          '🍞 The yeast you could do is enjoy this.',
+          '🥖 Proof that good things take time to rise.',
+          '🍞 Knead I say more?'
+        ];
+        const randomMessage = funMessages[Math.floor(Math.random() * funMessages.length)];
+
+        const embed = new EmbedBuilder()
+          .setColor(0xD4A574)
+          .setTitle(`🥖 ${bread.name}`)
+          .setDescription(`${randomMessage}\n\n*${bread.desc}*`)
+          .setImage(bread.url)
+          .setFooter({ text: `Bread #${breadIndex + 1} of ${breadImages.length} • !bread for more carbs` });
+
+        await message.reply({ embeds: [embed] });
         break;
       }
 
