@@ -31,7 +31,7 @@
   "homepage": "https://github.com/sashathelambo/discord-mcp#readme",
   "dependencies": {
     "@discordjs/voice": "^0.18.0",
-    "@modelcontextprotocol/sdk": "^1.16.0",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "cors": "^2.8.5",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.0",
